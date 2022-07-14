@@ -1,23 +1,33 @@
-import os, random
+import os, random, zipfile, urllib.request
+import matplotlib.pyplot as plt
 
 def parseSchedule(playerID, year):
     """
     returns a pitch-by-pitch summary of every plate appearances for the given
     player in the given year.
     """
-    directory = os.fsencode('{}eve'.format(year))
-    plateAppearances = []
+    # retrieve the folder of events from the appropriate season
+    # a team's event file includes only its home games, so we'll need all of them
+    url = 'https://www.retrosheet.org/events/{}eve.zip'.format(year)
+    with urllib.request.urlopen(url) as f:
+        with open('events.zip', 'wb') as output:
+            output.write(f.read())
+    with zipfile.ZipFile('events.zip', 'r') as zip_ref:
+        zip_ref.extractall('events')
+    os.remove('events.zip')
 
-    # A team's event file includes only its home games, so we need to iterate
-    # through every one
+    directory = os.fsencode('events')
+    plateAppearances=[]
+
     for file in os.listdir(directory):
         filename = os.fsdecode(file)
         if filename.endswith('.EVN') or filename.endswith('.EVA'):
-            source = open('{}eve/{}'.format(year, filename), 'r')
+            source = open('events/{}'.format(filename), 'r')
             schedule = source.readlines()
             source.close()
             # pull out just plays from the player we're interested in
             for line in schedule:
+                plateAppearances
                 if playerID in line and 'play' in line:
                     plateAppearances.append(line.strip().split(','))
 
@@ -42,20 +52,19 @@ def parseSchedule(playerID, year):
     # eliminates lines where the pitch-by-pitch summary is the same as the
     # beginning of the pitch-by-pitch summary of the next line (+ a period,
     # which Retrosheet uses to denote non-pitch events)
-    prev_pa = ['']*7
-    for i,pa in enumerate(plateAppearances):
-        if prev_pa[5] + '.' in pa[5]:
-            plateAppearances.remove(prev_pa)
-        prev_pa = pa
+    droppedPlateAppearances = []
+    for i in range(len(plateAppearances)-1):
+        if plateAppearances[i][5] + '.' not in plateAppearances[i+1][5]:
+            droppedPlateAppearances.append(plateAppearances[i])
 
-    return plateAppearances 
+    return droppedPlateAppearances
 
 def pa_sim(pa, ball_rate_swing, ball_rate_all):
     """
     Takes in a Retrosheet pitch-by-pitch summary of a plate appearance and
     simulates how that plate appearance would go without a bat.
     ball_rate_swing: chance that a pitch was outside, given that the batter swung.
-    ball_rate_all: chance that a pitch was outside.
+    ball_rate_all: chance that any given pitch was outside.
     """
     balls = 0
     strikes = 0
@@ -78,7 +87,6 @@ def pa_sim(pa, ball_rate_swing, ball_rate_all):
             break
         elif balls == 4:
             return walk_return_value
-            break
         
     while strikes < 3 and balls < 4:
         if random.random() <= ball_rate_all: 
@@ -93,17 +101,23 @@ def pa_sim(pa, ball_rate_swing, ball_rate_all):
 if __name__ == "__main__":
     playerID = 'bondb001'
     year = 2004
-    filename = 'OBP-{}-{}.csv'.format(playerID, year)
     
     season = parseSchedule(playerID, year)
     PAs = len(season)
-    trials = 1000
+    trials = 3000
 
-    out = open(filename, 'a')   
+    OBPtrials = []
     for i in range(trials):
         onbase = 0
         for pa in season:
-            onbase += pa_sim(pa[1], 0.191, 0.587)
-        out.write(str(onbase/PAs) + '\n')
-
-    out.close()
+            onbase += pa_sim(pa[5], 0.191, 0.587)
+        OBPtrials.append(onbase/PAs)
+    meanOBP = sum(OBPtrials)/len(OBPtrials)
+    
+    plt.hist(OBPtrials, 20)
+    plt.axvline(meanOBP, color='r', linestyle='dashed', linewidth=1)
+    plt.xlabel('OBP (mean: {})'.format(round(meanOBP, 4)))
+    plt.ylabel('Frequency')
+    plt.title('Histogram of OBP without bat')
+    plt.savefig('OBPdist.png')
+    plt.show()
